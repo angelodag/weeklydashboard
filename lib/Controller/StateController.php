@@ -5,8 +5,6 @@ namespace OCA\WeeklyDashboard\Controller;
 
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\DataResponse;
-use OCP\AppFramework\Http\Response;
-use OCP\AppFramework\Http\PlainTextResponse;
 use OCP\Files\IRootFolder;
 use OCP\IRequest;
 use OCP\IUserSession;
@@ -35,9 +33,12 @@ class StateController extends Controller {
 	}
 
 	/**
+	 * Returns JSON: { ok: true, csv: "...", etag: "..." }
+	 *
 	 * @NoAdminRequired
+	 * @NoCSRFRequired
 	 */
-	public function get(): Response {
+	public function get(): DataResponse {
 		$user = $this->userSession->getUser();
 		if ($user === null) {
 			return new DataResponse(['ok' => false, 'error' => 'Not logged in'], 401);
@@ -49,54 +50,47 @@ class StateController extends Controller {
 		$dirName = 'WeeklyDashboard';
 		$fileName = 'dashboard.csv';
 
-		// If folder/file doesn't exist, return default CSV with no ETag
-		if (!$userFolder->nodeExists($dirName)) {
-			return new PlainTextResponse(
-				$this->defaultCsv(),
-				200,
-				[
-					'Content-Type' => 'text/csv; charset=utf-8',
-					'Cache-Control' => 'no-store',
-				]
-			);
+		$csv = $this->defaultCsv();
+		$etag = null;
+
+		if ($userFolder->nodeExists($dirName)) {
+			$dir = $userFolder->get($dirName);
+
+			if ($dir instanceof \OCP\Files\Folder && $dir->nodeExists($fileName)) {
+				$file = $dir->get($fileName);
+
+				if ($file instanceof \OCP\Files\File) {
+					$csv = (string)$file->getContent();
+					if (trim($csv) === '') {
+						$csv = $this->defaultCsv();
+					}
+					$etag = $file->getEtag();
+				}
+			}
 		}
 
-		$dir = $userFolder->get($dirName);
-		if (!($dir instanceof \OCP\Files\Folder)) {
-			return new DataResponse(['ok' => false, 'error' => 'Storage path is not a folder'], 500);
+		$headers = ['Cache-Control' => 'no-store'];
+		if ($etag !== null) {
+			$headers['ETag'] = $etag;
 		}
 
-		if (!$dir->nodeExists($fileName)) {
-			return new PlainTextResponse(
-				$this->defaultCsv(),
-				200,
-				[
-					'Content-Type' => 'text/csv; charset=utf-8',
-					'Cache-Control' => 'no-store',
-				]
-			);
-		}
-
-		$file = $dir->get($fileName);
-		if (!($file instanceof \OCP\Files\File)) {
-			return new DataResponse(['ok' => false, 'error' => 'State path is not a file'], 500);
-		}
-
-		$content = $file->getContent();
-		$etag = $file->getEtag();
-
-		$response = new PlainTextResponse($content, 200, [
-			'Content-Type' => 'text/csv; charset=utf-8',
-			'Cache-Control' => 'no-store',
-			'ETag' => $etag,
-		]);
-		return $response;
+		return new DataResponse(
+			[
+				'ok' => true,
+				'csv' => $csv,
+				'etag' => $etag,
+			],
+			200,
+			$headers
+		);
 	}
 
 	/**
+	 * Expects raw CSV in request body.
+	 *
 	 * @NoAdminRequired
 	 */
-	public function put(): Response {
+	public function put(): DataResponse {
 		$user = $this->userSession->getUser();
 		if ($user === null) {
 			return new DataResponse(['ok' => false, 'error' => 'Not logged in'], 401);
@@ -108,15 +102,14 @@ class StateController extends Controller {
 		$dirName = 'WeeklyDashboard';
 		$fileName = 'dashboard.csv';
 
-		$body = (string)$this->request->getContent();
+		// Portable: read raw request body
+		$body = (string)file_get_contents('php://input');
 
-		// Basic validation: must include header
 		if (stripos($body, 'id,title,description,lane') === false) {
 			return new DataResponse(['ok' => false, 'error' => 'Invalid CSV (missing header)'], 400);
 		}
 
 		// Ensure folder exists
-		$dir = null;
 		if ($userFolder->nodeExists($dirName)) {
 			$node = $userFolder->get($dirName);
 			if (!($node instanceof \OCP\Files\Folder)) {
@@ -127,18 +120,18 @@ class StateController extends Controller {
 			$dir = $userFolder->newFolder($dirName);
 		}
 
-		// If file exists, enforce optimistic concurrency via If-Match
+		// Existing file => require If-Match for overwrite protection
 		if ($dir->nodeExists($fileName)) {
 			$node = $dir->get($fileName);
 			if (!($node instanceof \OCP\Files\File)) {
 				return new DataResponse(['ok' => false, 'error' => 'State path is not a file'], 500);
 			}
+
 			$currentEtag = $node->getEtag();
 
 			$ifMatch = $this->request->getHeader('If-Match');
 			$ifMatch = $ifMatch !== null ? trim($ifMatch) : '';
 
-			// Require If-Match for overwriting existing state
 			if ($ifMatch === '') {
 				return new DataResponse(
 					[
@@ -146,13 +139,16 @@ class StateController extends Controller {
 						'error' => 'Missing If-Match header (required to prevent overwrites)',
 						'currentEtag' => $currentEtag,
 					],
-					428 // Precondition Required
+					428
 				);
 			}
 
-			// Some clients wrap etag in quotes; accept both
-			$normalizedIfMatch = trim($ifMatch, "\"");
-			$normalizedCurrent = trim($currentEtag, "\"");
+			// Accept quoted/unquoted and weak etags W/"..."
+			$normalizedIfMatch = preg_replace('/^W\\//', '', trim($ifMatch));
+			$normalizedIfMatch = trim((string)$normalizedIfMatch, "\"");
+
+			$normalizedCurrent = preg_replace('/^W\\//', '', trim($currentEtag));
+			$normalizedCurrent = trim((string)$normalizedCurrent, "\"");
 
 			if ($normalizedIfMatch !== $normalizedCurrent) {
 				return new DataResponse(
@@ -161,7 +157,7 @@ class StateController extends Controller {
 						'error' => 'ETag mismatch (state changed since you loaded it)',
 						'currentEtag' => $currentEtag,
 					],
-					409 // Conflict
+					409
 				);
 			}
 
@@ -185,7 +181,7 @@ class StateController extends Controller {
 			);
 		}
 
-		// If file doesn't exist yet, create it (no If-Match needed)
+		// First-time create (no If-Match required)
 		$file = $dir->newFile($fileName);
 		$file->putContent($body);
 

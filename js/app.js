@@ -5,8 +5,6 @@
   const MAX_TASKS = 30;
 
   const API_STATE_URL = OC.generateUrl("/apps/weeklydashboard/api/state");
-
-  // Local UI prefs (optional; Nextcloud snapshot also stores UI state)
   const K_DONE_H = "weekly_dashboard_done_height_px_local";
 
   const state = {
@@ -17,19 +15,12 @@
     editingId: null,
     draft: null,
     doneResizer: { splitter: null, lane: null, main: null, set: null },
-
-    // ETag of the last state loaded from Nextcloud (for optimistic concurrency)
     remoteEtag: null,
   };
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-  const uid = () =>
-    "t_" +
-    Math.random().toString(36).slice(2, 9) +
-    "_" +
-    Date.now().toString(36);
-
+  const uid = () => "t_" + Math.random().toString(36).slice(2, 9) + "_" + Date.now().toString(36);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
   const nowStamp = () => {
@@ -38,23 +29,11 @@
     return `${wd} ${d.toISOString().slice(0, 10)}`;
   };
 
-  const lsGet = (k) => {
-    try {
-      return localStorage.getItem(k);
-    } catch {
-      return null;
-    }
-  };
-  const lsSet = (k, v) => {
-    try {
-      localStorage.setItem(k, v);
-    } catch {}
-  };
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
   const isWaitingDesc = (desc) =>
-    String(desc ?? "")
-      .split(/\r?\n/)
-      .some((l) => l.trim().toUpperCase() === "WAITING");
+    String(desc ?? "").split(/\r?\n/).some((l) => l.trim().toUpperCase() === "WAITING");
 
   const normalizeWaiting = (desc, waiting) => {
     const raw = String(desc ?? "");
@@ -66,39 +45,20 @@
     return cleaned.join("\n");
   };
 
-  function ensureInOrder(id, lane) {
-    const arr = state.order[lane];
-    if (!arr.includes(id)) arr.push(id);
-  }
-  function removeFromAllOrders(id) {
-    for (const l of LANES) {
-      const arr = state.order[l];
-      const i = arr.indexOf(id);
-      if (i >= 0) arr.splice(i, 1);
-    }
-  }
-  function moveToBottom(id, lane) {
-    const arr = state.order[lane];
-    const i = arr.indexOf(id);
-    if (i >= 0) arr.splice(i, 1);
-    arr.push(id);
-  }
+  function ensureInOrder(id, lane) { const arr = state.order[lane]; if (!arr.includes(id)) arr.push(id); }
+  function removeFromAllOrders(id) { for (const l of LANES) { const a = state.order[l]; const i = a.indexOf(id); if (i >= 0) a.splice(i, 1); } }
+  function moveToBottom(id, lane) { const a = state.order[lane]; const i = a.indexOf(id); if (i >= 0) a.splice(i, 1); a.push(id); }
   function tasksForLane(lane) {
     const inLane = [...state.tasks.values()].filter((t) => t.lane === lane);
     const byId = new Map(inLane.map((t) => [t.id, t]));
     const ordered = [];
-    for (const id of state.order[lane]) {
-      const t = byId.get(id);
-      if (t) ordered.push(t);
-    }
-    for (const t of inLane) {
-      if (!state.order[lane].includes(t.id)) ordered.push(t);
-    }
+    for (const id of state.order[lane]) { const t = byId.get(id); if (t) ordered.push(t); }
+    for (const t of inLane) { if (!state.order[lane].includes(t.id)) ordered.push(t); }
     state.order[lane] = ordered.map((t) => t.id);
     return ordered;
   }
 
-  // ---------- CSV (with meta comment lines) ----------
+  // ---- CSV with meta comment lines ----
   function escapeCsvCell(v) {
     const s = String(v ?? "");
     if (/[\n\r,"]/g.test(s)) return '"' + s.replace(/"/g, '""') + '"';
@@ -106,11 +66,11 @@
   }
 
   function parseCsv(text) {
-    const s = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const s = String(text ?? "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     const lines = s.split("\n");
-
     const meta = {};
     const dataLines = [];
+
     for (const line of lines) {
       if (line.startsWith("#")) {
         const m = line.slice(1).trim();
@@ -132,39 +92,17 @@
       if (inQuotes) {
         if (ch === '"') {
           const nx = src[i + 1];
-          if (nx === '"') {
-            cell += '"';
-            i++;
-            continue;
-          }
-          inQuotes = false;
-          continue;
+          if (nx === '"') { cell += '"'; i++; continue; }
+          inQuotes = false; continue;
         }
-        cell += ch;
-        continue;
+        cell += ch; continue;
       }
-      if (ch === '"') {
-        inQuotes = true;
-        continue;
-      }
-      if (ch === ",") {
-        row.push(cell);
-        cell = "";
-        continue;
-      }
-      if (ch === "\n") {
-        row.push(cell);
-        rows.push(row);
-        row = [];
-        cell = "";
-        continue;
-      }
+      if (ch === '"') { inQuotes = true; continue; }
+      if (ch === ",") { row.push(cell); cell = ""; continue; }
+      if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; continue; }
       cell += ch;
     }
-    if (cell.length || row.length) {
-      row.push(cell);
-      rows.push(row);
-    }
+    if (cell.length || row.length) { row.push(cell); rows.push(row); }
 
     const header = (rows.shift() || []).map((h) => (h || "").trim());
     const out = [];
@@ -235,7 +173,6 @@
         lane,
         doneStamp: String(r.doneStamp || ""),
       };
-
       if (t.lane !== "done") t.doneStamp = "";
 
       const oi = Number(r.orderIndex);
@@ -251,17 +188,13 @@
       list.forEach((t) => delete t._orderIndex);
     }
 
-    // Apply UI meta from CSV
+    // Apply UI meta
     const root = $("#weeklydashboard-root");
     root.classList.toggle("backlog-collapsed", parsed.meta["ui.backlogCollapsed"] === "1");
     root.classList.toggle("done-collapsed", parsed.meta["ui.doneCollapsed"] === "1");
 
     const doneHeightPx = Number(parsed.meta["ui.doneHeightPx"]);
-    if (
-      parsed.meta["ui.doneCollapsed"] !== "1" &&
-      Number.isFinite(doneHeightPx) &&
-      doneHeightPx > 0
-    ) {
+    if (parsed.meta["ui.doneCollapsed"] !== "1" && Number.isFinite(doneHeightPx) && doneHeightPx > 0) {
       lsSet(K_DONE_H, String(Math.round(doneHeightPx)));
     }
 
@@ -269,16 +202,16 @@
     applyCollapseUI();
   }
 
-  // ---------- Nextcloud sync (ETag aware) ----------
+  // ---- Nextcloud sync (JSON GET + If-Match PUT) ----
   async function loadFromNextcloud() {
     const r = await fetch(API_STATE_URL, { credentials: "same-origin" });
     if (!r.ok) throw new Error(`Load failed (${r.status})`);
 
-    const etag = r.headers.get("ETag");
-    state.remoteEtag = etag ? etag.replace(/^"|"$/g, "") : null;
+    const data = await r.json();
+    if (!data || !data.ok) throw new Error(data?.error || "Load failed");
 
-    const csv = await r.text();
-    loadSnapshotFromCsv(csv);
+    state.remoteEtag = data.etag ? String(data.etag).replace(/^"|"$/g, "") : null;
+    loadSnapshotFromCsv(String(data.csv || ""));
   }
 
   async function saveToNextcloud() {
@@ -288,11 +221,7 @@
       requesttoken: OC.requestToken,
       "Content-Type": "text/csv; charset=utf-8",
     };
-
-    // If the server file already exists, backend requires If-Match
-    if (state.remoteEtag) {
-      headers["If-Match"] = state.remoteEtag;
-    }
+    if (state.remoteEtag) headers["If-Match"] = state.remoteEtag;
 
     const r = await fetch(API_STATE_URL, {
       method: "PUT",
@@ -302,34 +231,27 @@
     });
 
     if (r.status === 428) {
-      // Precondition Required: missing If-Match
       const data = await r.json().catch(() => null);
-      const current = data && data.currentEtag ? data.currentEtag : "unknown";
       throw new Error(
-        `Save blocked to prevent overwriting newer changes. Please click “Load from Nextcloud” first.\n(Current ETag: ${current})`
+        `Save blocked to prevent overwriting newer changes. Please click “Load from Nextcloud” first.\n(Current ETag: ${data?.currentEtag || "unknown"})`
       );
     }
-
     if (r.status === 409) {
-      // Conflict: ETag mismatch
       const data = await r.json().catch(() => null);
-      const current = data && data.currentEtag ? data.currentEtag : "unknown";
       throw new Error(
-        `Conflict: the dashboard changed in Nextcloud since you loaded it.\nClick “Load from Nextcloud” to refresh, then save again.\n(Current ETag: ${current})`
+        `Conflict: the dashboard changed in Nextcloud since you loaded it.\nClick “Load from Nextcloud”, then save again.\n(Current ETag: ${data?.currentEtag || "unknown"})`
       );
     }
-
     if (!r.ok) {
       const msg = await r.text().catch(() => "");
       throw new Error(`Save failed (${r.status}) ${msg}`);
     }
 
-    // Update local ETag to new one returned by server
-    const newEtag = r.headers.get("ETag");
-    if (newEtag) state.remoteEtag = newEtag.replace(/^"|"$/g, "");
+    const data = await r.json().catch(() => null);
+    if (data?.etag) state.remoteEtag = String(data.etag).replace(/^"|"$/g, "");
   }
 
-  // ---------- Local export/import ----------
+  // ---- Local export/import ----
   function downloadLocalCsv(filename, text) {
     const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -342,7 +264,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 500);
   }
 
-  // ---------- UI build ----------
+  // ---- UI mount ----
   function mount() {
     const root = $("#weeklydashboard-root");
     root.className = "wd-root";
@@ -353,14 +275,16 @@
             <div class="wd-logo" aria-hidden="true"></div>
             <div class="wd-titleblock">
               <h1>Weekly Task Dashboard</h1>
-              <p>Nextcloud-backed single file snapshot with overwrite protection (ETag).</p>
+              <p>Nextcloud single-file snapshot (JSON GET + ETag overwrite protection).</p>
             </div>
           </div>
+
           <div class="wd-controls">
             <div class="wd-week" title="Optional label used for filenames only.">
               <label for="wdWeek">Week</label>
               <input id="wdWeek" placeholder="e.g., 2026-W26" />
             </div>
+
             <button class="wd-btn accent" id="wdNew">+ New Task</button>
 
             <button class="wd-btn good" id="wdSaveNC">Save to Nextcloud</button>
@@ -375,7 +299,7 @@
         </div>
 
         <div class="wd-hint">
-          Save-to-Nextcloud requires you to load first (to get the current ETag). If you get a conflict, load again and re-save.
+          Load from Nextcloud sets the current ETag; Save uses If-Match to prevent overwrites.
         </div>
       </div>
 
@@ -445,14 +369,9 @@
 
       <div class="wd-tip" id="wdTip"></div>
     `;
-
-    wireUiHandlers();
-    wireDnD();
-    initDoneResizer();
-    applyCollapseUI();
   }
 
-  // ---------- Collapse UI ----------
+  // ---- Collapse UI ----
   function applyCollapseUI() {
     const root = $("#weeklydashboard-root");
     const bc = root.classList.contains("backlog-collapsed");
@@ -479,7 +398,7 @@
     }
   }
 
-  // ---------- Done resizer ----------
+  // ---- Done resizer ----
   function initDoneResizer() {
     const mainCol = $(".wd-maincol");
     const days = $(".wd-days");
@@ -494,15 +413,12 @@
     days.style.flex = "1 1 auto";
     doneLane.style.flex = "0 0 auto";
 
-    const MIN = 140;
-    const MAXR = 0.6;
-
+    const MIN = 140, MAXR = 0.6;
     const clampDone = (px) => {
       const avail = mainCol.clientHeight;
       const max = Math.max(MIN, Math.floor(avail * MAXR));
       return Math.max(MIN, Math.min(px, max));
     };
-
     const setDone = (px) => {
       const h = clampDone(px);
       doneLane.style.height = h + "px";
@@ -515,15 +431,10 @@
     const n = saved ? Number(saved) : NaN;
     setDone(Number.isFinite(n) && n > 0 ? n : Math.floor(mainCol.clientHeight * 0.33));
 
-    let dragging = false,
-      startY = 0,
-      startH = 0;
-
+    let dragging = false, startY = 0, startH = 0;
     splitter.addEventListener("pointerdown", (e) => {
       if ($("#weeklydashboard-root").classList.contains("done-collapsed")) return;
-      dragging = true;
-      startY = e.clientY;
-      startH = doneLane.getBoundingClientRect().height;
+      dragging = true; startY = e.clientY; startH = doneLane.getBoundingClientRect().height;
       splitter.setPointerCapture(e.pointerId);
       document.body.style.cursor = "row-resize";
     });
@@ -531,20 +442,14 @@
       if (!dragging) return;
       setDone(startH - (e.clientY - startY));
     });
-    const end = () => {
-      dragging = false;
-      document.body.style.cursor = "";
-    };
+    const end = () => { dragging = false; document.body.style.cursor = ""; };
     splitter.addEventListener("pointerup", end);
     splitter.addEventListener("pointercancel", end);
-
     window.addEventListener("resize", () => {
       if ($("#weeklydashboard-root").classList.contains("done-collapsed")) return;
       setDone(doneLane.getBoundingClientRect().height);
     });
   }
-
-  // ---------- Render ----------
   function render() {
     for (const lane of LANES) {
       const zone = $(`[data-dropzone="${lane}"]`);
@@ -554,12 +459,11 @@
       if (!list.length) {
         const e = document.createElement("div");
         e.className = "wd-empty";
-        e.textContent =
-          lane === "backlog"
-            ? "Drop tasks here (or create a new one)."
-            : lane === "done"
-              ? "Drop finished tasks here."
-              : "Drop tasks here.";
+        e.textContent = lane === "backlog"
+          ? "Drop tasks here (or create a new one)."
+          : lane === "done"
+            ? "Drop finished tasks here."
+            : "Drop tasks here.";
         zone.appendChild(e);
       } else {
         list.forEach((t) => zone.appendChild(taskEl(t)));
@@ -613,17 +517,13 @@
     return el;
   }
 
-  // ---------- Tooltip ----------
-  const tip = () => $("#wdTip");
+  // ---- Tooltip ----
+  const tipEl = () => $("#wdTip");
   let tipOn = false;
-
   function showTip(e, text) {
     const c = (text || "").trim();
-    const t = tip();
-    if (!c) {
-      hideTip();
-      return;
-    }
+    const t = tipEl();
+    if (!c) { hideTip(); return; }
     t.textContent = c;
     t.style.display = "block";
     tipOn = true;
@@ -635,15 +535,14 @@
   function hideTip() {
     if (!tipOn) return;
     tipOn = false;
-    const t = tip();
+    const t = tipEl();
     t.style.display = "none";
     t.textContent = "";
   }
 
-  // ---------- DnD reorder ----------
+  // ---- DnD ----
   function cleanupPlaceholder() {
-    if (state.placeholder && state.placeholder.parentNode)
-      state.placeholder.parentNode.removeChild(state.placeholder);
+    if (state.placeholder && state.placeholder.parentNode) state.placeholder.parentNode.removeChild(state.placeholder);
   }
   function computeInsertBefore(zone, y) {
     const items = [...zone.querySelectorAll(".wd-task:not(.wd-ghost)")];
@@ -664,18 +563,15 @@
   function wireDnD() {
     for (const lane of LANES) {
       const zone = $(`[data-dropzone="${lane}"]`);
-
       zone.addEventListener("dragover", (e) => {
         e.preventDefault();
         zone.classList.add("dragover");
         ensurePlaceholder(zone, computeInsertBefore(zone, e.clientY));
         e.dataTransfer.dropEffect = "move";
       });
-
       zone.addEventListener("dragleave", (e) => {
         if (!zone.contains(e.relatedTarget)) zone.classList.remove("dragover");
       });
-
       zone.addEventListener("drop", (e) => {
         e.preventDefault();
         zone.classList.remove("dragover");
@@ -684,17 +580,15 @@
       });
     }
   }
-
   function finalizeDrop(id, targetLane) {
     const t = state.tasks.get(id);
     if (!t) return;
     const fromLane = t.lane;
 
     let insertIndex = null;
-    if (state.placeholder && state.placeholder.parentNode === $(`[data-dropzone="${targetLane}"]`)) {
-      const kids = [...$(`[data-dropzone="${targetLane}"]`).children].filter(
-        (el) => el.classList.contains("wd-task") || el.classList.contains("wd-placeholder")
-      );
+    const zone = $(`[data-dropzone="${targetLane}"]`);
+    if (state.placeholder && state.placeholder.parentNode === zone) {
+      const kids = [...zone.children].filter((el) => el.classList.contains("wd-task") || el.classList.contains("wd-placeholder"));
       insertIndex = kids.indexOf(state.placeholder);
       if (insertIndex < 0) insertIndex = null;
     }
@@ -717,7 +611,7 @@
     render();
   }
 
-  // ---------- Modal ----------
+  // ---- Modal ----
   const overlay = () => $("#wdOverlay");
   const modalTitle = () => $("#wdModalTitle");
   const inTitle = () => $("#wdTaskTitle");
@@ -728,7 +622,6 @@
 
   function openModal(mode, id) {
     overlay().classList.add("open");
-
     if (mode === "edit") {
       state.editingId = id;
       const t = state.tasks.get(id);
@@ -745,7 +638,6 @@
       inDesc().value = "";
       btnDelete().style.display = "none";
     }
-
     btnWaiting().style.display = "inline-block";
     syncWaitingBtn();
     setTimeout(() => inTitle().focus(), 30);
@@ -756,12 +648,10 @@
     state.draft.title = (inTitle().value || "").trim();
     state.draft.description = (inDesc().value || "").trim();
   }
-
   function syncWaitingBtn() {
     if (!state.draft) return;
     btnWaiting().textContent = isWaitingDesc(state.draft.description) ? "Waiting ✓" : "Waiting";
   }
-
   function toggleWaitingInDraft() {
     if (!state.draft) return;
     const cur = isWaitingDesc(state.draft.description);
@@ -769,25 +659,21 @@
     inDesc().value = state.draft.description;
     syncWaitingBtn();
   }
-
   function closeModal(commit = true) {
     if (commit) commitDraft();
     overlay().classList.remove("open");
     state.editingId = null;
     state.draft = null;
   }
-
   function commitDraft() {
     if (!state.draft) return;
     syncDraftFromInputs();
-
     const waiting = isWaitingDesc(state.draft.description);
     state.draft.description = normalizeWaiting(state.draft.description, waiting);
 
     if (state.editingId) {
       const ex = state.tasks.get(state.editingId);
       if (!ex) return;
-
       const wasWaiting = isWaitingDesc(ex.description);
 
       ex.title = state.draft.title;
@@ -797,25 +683,14 @@
       if (!wasWaiting && waiting) moveToBottom(ex.id, ex.lane);
     } else {
       if (!state.draft.title) return;
-      if (state.tasks.size >= MAX_TASKS) {
-        alert(`Weekly limit reached (${MAX_TASKS} tasks).`);
-        return;
-      }
-      const t = {
-        id: uid(),
-        title: state.draft.title,
-        description: state.draft.description,
-        lane: "backlog",
-        doneStamp: "",
-      };
+      if (state.tasks.size >= MAX_TASKS) { alert(`Weekly limit reached (${MAX_TASKS} tasks).`); return; }
+      const t = { id: uid(), title: state.draft.title, description: state.draft.description, lane: "backlog", doneStamp: "" };
       state.tasks.set(t.id, t);
       ensureInOrder(t.id, "backlog");
       if (waiting) moveToBottom(t.id, "backlog");
     }
-
     render();
   }
-
   function deleteEditing() {
     if (!state.editingId) return;
     const t = state.tasks.get(state.editingId);
@@ -827,7 +702,7 @@
     render();
   }
 
-  // ---------- UI handlers ----------
+  // ---- UI handlers ----
   function wireUiHandlers() {
     $("#wdCollapseBacklog").addEventListener("click", () => {
       const root = $("#weeklydashboard-root");
@@ -840,17 +715,12 @@
       applyCollapseUI();
     });
 
-    overlay().addEventListener("click", (e) => {
-      if (e.target === overlay()) closeModal(true);
-    });
+    overlay().addEventListener("click", (e) => { if (e.target === overlay()) closeModal(true); });
     btnClose().addEventListener("click", () => closeModal(true));
     btnDelete().addEventListener("click", deleteEditing);
     btnWaiting().addEventListener("click", toggleWaitingInDraft);
     inTitle().addEventListener("input", () => syncDraftFromInputs());
-    inDesc().addEventListener("input", () => {
-      syncDraftFromInputs();
-      syncWaitingBtn();
-    });
+    inDesc().addEventListener("input", () => { syncDraftFromInputs(); syncWaitingBtn(); });
     document.addEventListener("keydown", (e) => {
       if (!overlay().classList.contains("open")) return;
       if (e.key === "Escape") closeModal(true);
@@ -862,10 +732,7 @@
     const doQuick = () => {
       const title = (quick.value || "").trim();
       if (!title) return;
-      if (state.tasks.size >= MAX_TASKS) {
-        alert(`Weekly limit reached (${MAX_TASKS} tasks).`);
-        return;
-      }
+      if (state.tasks.size >= MAX_TASKS) { alert(`Weekly limit reached (${MAX_TASKS} tasks).`); return; }
       const t = { id: uid(), title, description: "", lane: "backlog", doneStamp: "" };
       state.tasks.set(t.id, t);
       ensureInOrder(t.id, "backlog");
@@ -873,27 +740,14 @@
       render();
     };
     $("#wdQuickAddBtn").addEventListener("click", doQuick);
-    quick.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        doQuick();
-      }
-    });
+    quick.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doQuick(); } });
 
     $("#wdLoadNC").addEventListener("click", async () => {
-      try {
-        await loadFromNextcloud();
-      } catch (err) {
-        alert(String(err?.message || err));
-      }
+      try { await loadFromNextcloud(); } catch (err) { alert(String(err?.message || err)); }
     });
     $("#wdSaveNC").addEventListener("click", async () => {
-      try {
-        await saveToNextcloud();
-        alert("Saved to Nextcloud Files (/WeeklyDashboard/dashboard.csv).");
-      } catch (err) {
-        alert(String(err?.message || err));
-      }
+      try { await saveToNextcloud(); alert("Saved to Nextcloud Files (/WeeklyDashboard/dashboard.csv)."); }
+      catch (err) { alert(String(err?.message || err)); }
     });
 
     $("#wdExport").addEventListener("click", () => {
@@ -913,20 +767,10 @@
 
     $("#wdArchiveDone").addEventListener("click", () => {
       const done = [...state.tasks.values()].filter((t) => t.lane === "done");
-      if (!done.length) {
-        alert("No done tasks to archive.");
-        return;
-      }
-      if (
-        !confirm(
-          `Archive ${done.length} done task(s)?\n\nThis will download a CSV of done tasks and then remove them from the Done lane.`
-        )
-      )
-        return;
+      if (!done.length) { alert("No done tasks to archive."); return; }
+      if (!confirm(`Archive ${done.length} done task(s)?\n\nThis will download a CSV of done tasks and then remove them from the Done lane.`)) return;
 
       const label = ($("#wdWeek").value || "weekly_tasks").trim().replace(/[^a-z0-9\-_]+/gi, "_");
-
-      // build done-only csv, preserving UI meta
       const meta = buildCsvSnapshot().split("\n").filter((l) => l.startsWith("#"));
       const header = "id,title,description,lane,doneStamp,orderIndex";
       const rows = [];
@@ -934,29 +778,16 @@
       ids.forEach((id, idx) => {
         const t = state.tasks.get(id);
         if (!t || t.lane !== "done") return;
-        rows.push(
-          [
-            escapeCsvCell(t.id),
-            escapeCsvCell(t.title),
-            escapeCsvCell(t.description),
-            "done",
-            escapeCsvCell(t.doneStamp || ""),
-            String(idx),
-          ].join(",")
-        );
+        rows.push([escapeCsvCell(t.id), escapeCsvCell(t.title), escapeCsvCell(t.description), "done", escapeCsvCell(t.doneStamp || ""), String(idx)].join(","));
       });
-
       downloadLocalCsv(`${label || "weekly_tasks"}_done_archive.csv`, meta.join("\n") + "\n" + header + "\n" + rows.join("\n") + "\n");
 
-      for (const t of done) {
-        state.tasks.delete(t.id);
-        removeFromAllOrders(t.id);
-      }
+      for (const t of done) { state.tasks.delete(t.id); removeFromAllOrders(t.id); }
       render();
     });
   }
 
-  // ---------- Bootstrap ----------
+  // ---- Start ----
   function seed() {
     const add = (title, description, lane) => {
       if (state.tasks.size >= MAX_TASKS) return;
@@ -971,15 +802,16 @@
 
   async function start() {
     mount();
+    wireUiHandlers();
+    wireDnD();
+    initDoneResizer();
+    applyCollapseUI();
+
     seed();
     render();
 
-    // Auto-load on startup to get current state + ETag
-    try {
-      await loadFromNextcloud();
-    } catch {
-      // ignore; user can click Load from Nextcloud
-    }
+    // auto-load snapshot on startup
+    try { await loadFromNextcloud(); } catch { /* ignore */ }
   }
 
   document.addEventListener("DOMContentLoaded", start);
