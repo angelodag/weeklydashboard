@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Weekly Dashboard">
+  <!-- Transparent background; white foreground objects only -->
+
+  <!-- Three enlarged vertical lanes (60% transparency) -->
+  <rect x="14" y="14" width="10" height="36" rx="5" fill="rgba(255,255,255,0.6)"/>
+  <rect x="27" y="14" width="10" height="36" rx="5" fill="rgba(255,255,255,0.6)"/>
+  <rect x="40" y="14" width="10" height="36" rx="5" fill="rgba(255,255,255,0.6)"/>
+
+  <!-- Tick overlaying the lanes (opaque white, bolder) -->
+  <path d="M18 33 L27 41 L47 21"
+        fill="none"
+        stroke="#ffffff"
+        stroke-width="6.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>

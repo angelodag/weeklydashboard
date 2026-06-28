@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<info>
+  <id>weeklydashboard</id>
+  <name>Weekly Dashboard</name>
+  <summary>Weekly task dashboard with Nextcloud Files persistence</summary>
+  <description>Drag-and-drop weekly task dashboard that saves/loads a single CSV snapshot in Nextcloud Files.</description>
+  <version>1.0.0</version>
+  <licence>agpl</licence>
+  <author>ANgelo D'Agnano</author>
+  <namespace>WeeklyDashboard</namespace>
+
+  <types>
+    <type>tools</type>
+  </types>
+
+  <dependencies>
+    <nextcloud min-version="33" />
+  </dependencies>
+
+  <bootstrap>OCA\WeeklyDashboard\AppInfo\Application</bootstrap>
+
+  <navigations>
+    <navigation>
+      <name>Weekly Dashboard</name>
+      <route>weeklydashboard.page.index</route>
+      <icon>weeklydashboard.svg</icon>
+      <order>7</order>
+    </navigation>
+  </navigations>
+
+</info>
