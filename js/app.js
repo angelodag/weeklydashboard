@@ -3,6 +3,7 @@
 (() => {
   const LANES = ["backlog", "mon", "tue", "wed", "thu", "fri", "done"];
   const MAX_TASKS = 30;
+  const APP_VERSION = "1.0.0";
 
   const API_STATE_URL = OC.generateUrl("/apps/weeklydashboard/api/state");
   const K_DONE_H = "weekly_dashboard_done_height_px_local";
@@ -120,6 +121,7 @@
 
     const metaLines = [];
     metaLines.push("# weeklydashboard v1");
+    metaLines.push(`# version=${APP_VERSION}`);
     metaLines.push(`# ui.backlogCollapsed=${root.classList.contains("backlog-collapsed") ? 1 : 0}`);
     metaLines.push(`# ui.doneCollapsed=${root.classList.contains("done-collapsed") ? 1 : 0}`);
 
@@ -158,6 +160,13 @@
 
   function loadSnapshotFromCsv(csvText) {
     const parsed = parseCsv(csvText);
+
+    // Versioning tag check
+    const loadedVersion = parsed.meta["version"];
+    if (loadedVersion && loadedVersion !== APP_VERSION) {
+      console.warn(`Version mismatch: App is ${APP_VERSION}, File is ${loadedVersion}`);
+      alert(`Notice: The loaded dashboard file is version ${loadedVersion}, which might have compatibility issues with the current app version (${APP_VERSION}).`);
+    }
 
     state.tasks.clear();
     state.order = Object.fromEntries(LANES.map((l) => [l, []]));
@@ -251,6 +260,15 @@
     if (data?.etag) state.remoteEtag = String(data.etag).replace(/^"|"$/g, "");
   }
 
+  // Helper for silent background saves
+  async function autoSaveToNextcloud() {
+    try {
+      await saveToNextcloud();
+    } catch (e) {
+      console.error("Auto-save failed:", e);
+    }
+  }
+
   // ---- Local export/import ----
   function downloadLocalCsv(filename, text) {
     const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
@@ -275,31 +293,20 @@
             <div class="wd-logo" aria-hidden="true"></div>
             <div class="wd-titleblock">
               <h1>Weekly Task Dashboard</h1>
-              <p>Nextcloud single-file snapshot (JSON GET + ETag overwrite protection).</p>
             </div>
           </div>
 
           <div class="wd-controls">
-            <div class="wd-week" title="Optional label used for filenames only.">
-              <label for="wdWeek">Week</label>
-              <input id="wdWeek" placeholder="e.g., 2026-W26" />
-            </div>
-
             <button class="wd-btn accent" id="wdNew">+ New Task</button>
 
-            <button class="wd-btn good" id="wdSaveNC">Save to Nextcloud</button>
             <button class="wd-btn warn" id="wdLoadNC">Load from Nextcloud</button>
 
             <button class="wd-btn good" id="wdExport">Export CSV</button>
             <button class="wd-btn warn" id="wdImportBtn">Import CSV</button>
 
             <button class="wd-btn warn" id="wdArchiveDone">Archive Done</button>
-            <input id="wdCsvFile" type="file" accept=".csv,text/csv" />
+            <input id="wdCsvFile" type="file" accept=".csv,text/csv" style="display: none;" />
           </div>
-        </div>
-
-        <div class="wd-hint">
-          Load from Nextcloud sets the current ETag; Save uses If-Match to prevent overwrites.
         </div>
       </div>
 
@@ -609,6 +616,7 @@
 
     cleanupPlaceholder();
     render();
+    autoSaveToNextcloud();
   }
 
   // ---- Modal ----
@@ -671,6 +679,8 @@
     const waiting = isWaitingDesc(state.draft.description);
     state.draft.description = normalizeWaiting(state.draft.description, waiting);
 
+    let changed = false;
+
     if (state.editingId) {
       const ex = state.tasks.get(state.editingId);
       if (!ex) return;
@@ -681,6 +691,7 @@
       state.tasks.set(ex.id, ex);
 
       if (!wasWaiting && waiting) moveToBottom(ex.id, ex.lane);
+      changed = true;
     } else {
       if (!state.draft.title) return;
       if (state.tasks.size >= MAX_TASKS) { alert(`Weekly limit reached (${MAX_TASKS} tasks).`); return; }
@@ -688,8 +699,10 @@
       state.tasks.set(t.id, t);
       ensureInOrder(t.id, "backlog");
       if (waiting) moveToBottom(t.id, "backlog");
+      changed = true;
     }
     render();
+    if (changed) autoSaveToNextcloud();
   }
   function deleteEditing() {
     if (!state.editingId) return;
@@ -700,6 +713,7 @@
     removeFromAllOrders(state.editingId);
     closeModal(false);
     render();
+    autoSaveToNextcloud();
   }
 
   // ---- UI handlers ----
@@ -738,6 +752,7 @@
       ensureInOrder(t.id, "backlog");
       quick.value = "";
       render();
+      autoSaveToNextcloud();
     };
     $("#wdQuickAddBtn").addEventListener("click", doQuick);
     quick.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doQuick(); } });
@@ -745,14 +760,10 @@
     $("#wdLoadNC").addEventListener("click", async () => {
       try { await loadFromNextcloud(); } catch (err) { alert(String(err?.message || err)); }
     });
-    $("#wdSaveNC").addEventListener("click", async () => {
-      try { await saveToNextcloud(); alert("Saved to Nextcloud Files (/WeeklyDashboard/dashboard.csv)."); }
-      catch (err) { alert(String(err?.message || err)); }
-    });
 
     $("#wdExport").addEventListener("click", () => {
-      const label = ($("#wdWeek").value || "weekly_tasks").trim().replace(/[^a-z0-9\-_]+/gi, "_");
-      downloadLocalCsv(`${label || "weekly_tasks"}.csv`, buildCsvSnapshot());
+      const label = "weekly_tasks";
+      downloadLocalCsv(`${label}.csv`, buildCsvSnapshot());
     });
 
     const fileInput = $("#wdCsvFile");
@@ -770,7 +781,7 @@
       if (!done.length) { alert("No done tasks to archive."); return; }
       if (!confirm(`Archive ${done.length} done task(s)?\n\nThis will download a CSV of done tasks and then remove them from the Done lane.`)) return;
 
-      const label = ($("#wdWeek").value || "weekly_tasks").trim().replace(/[^a-z0-9\-_]+/gi, "_");
+      const label = "weekly_tasks";
       const meta = buildCsvSnapshot().split("\n").filter((l) => l.startsWith("#"));
       const header = "id,title,description,lane,doneStamp,orderIndex";
       const rows = [];
@@ -780,10 +791,11 @@
         if (!t || t.lane !== "done") return;
         rows.push([escapeCsvCell(t.id), escapeCsvCell(t.title), escapeCsvCell(t.description), "done", escapeCsvCell(t.doneStamp || ""), String(idx)].join(","));
       });
-      downloadLocalCsv(`${label || "weekly_tasks"}_done_archive.csv`, meta.join("\n") + "\n" + header + "\n" + rows.join("\n") + "\n");
+      downloadLocalCsv(`${label}_done_archive.csv`, meta.join("\n") + "\n" + header + "\n" + rows.join("\n") + "\n");
 
       for (const t of done) { state.tasks.delete(t.id); removeFromAllOrders(t.id); }
       render();
+      autoSaveToNextcloud();
     });
   }
 

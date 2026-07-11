@@ -26,6 +26,7 @@ class StateController extends Controller {
 
 	private function defaultCsv(): string {
 		return "# weeklydashboard v1\n"
+			. "# version=1.0.0\n"
 			. "# ui.backlogCollapsed=0\n"
 			. "# ui.doneCollapsed=0\n"
 			. "# ui.doneHeightPx=\n"
